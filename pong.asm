@@ -17,8 +17,10 @@ DATA SEGMENT PARA 'DATA'
 	window_diff DW 05h		; you can specify how far from the window borders you want the ball to collide from 
 	paddle_left_x DW 0Ah ;paddle x position current
 	paddle_left_y DW 0Ah ;paddle y position current
+	paddle_left_points DB 0 ;current point of the left player (player 1)
 	paddle_right_x DW 130h ;paddle x position current
 	paddle_right_y DW 0Ah ;paddle y position current
+	paddle_right_points DB 0; current point of the right player (player 2)
 	paddle_width DW 05h ;paddle's width
 	paddle_height DW 1Fh ;paddle's height
 	paddle_velocity DW 05h ;paddle's velocity
@@ -160,35 +162,108 @@ CODE SEGMENT PARA 'CODE'
 		
 		MOV AX, window_diff
 		CMP ball_X,AX			; if current ballX position <= 0+specified window difference, then it collides
-		JLE reset_position	; go to reset position instead of jumping from the side
+		JLE GIVE_POINTS_TO_PLAYER_TWO	;give one point to player two and reset ball position
 		
 		MOV AX, window_Width	
 		SUB AX,ball_Size		;account for ball size
 		SUB AX,window_diff
 		CMP ball_X,AX			;if current ballX position >= window, then it collides
-		JGE reset_position		; go to reset position instead of jumping from the side
+		JGE GIVE_POINTS_TO_PLAYER_ONE		;give one point to player one and reset ball position
+		JMP MOVE_BALL_VERTICALLY
 		
-		MOV AX,ball_YSpeed		;move ball in ySpeed direction
-		ADD ball_Y,AX
+		GIVE_POINTS_TO_PLAYER_ONE:
+			INC paddle_left_points ;increment player one points
+			CALL RESET_BALL_POSITION ;reset ball to the center of the screen
+			CMP paddle_left_points, 05h;check if this player has reached 5 points
+			JGE GAME_OVER ;if this player reached 5 or more, the game is over
+			RET
+			
+		GIVE_POINTS_TO_PLAYER_TWO:
+			INC paddle_right_points ;increment player two points
+			CALL RESET_BALL_POSITION ;reset ball to the center of the screen
+			CMP paddle_right_points, 05h;check if this player has reached 5 points
+			JGE GAME_OVER ;if this player reached 5 or more, the game is over
+			RET
+			
+		GAME_OVER: ;someone has reached 5 points
+			MOV paddle_left_points, 00h ;restart player one points
+			MOV paddle_right_points, 00h ;restart player two points
+			RET
+		
+		MOVE_BALL_VERTICALLY: 		
+			MOV AX,ball_YSpeed		;move ball in ySpeed direction
+			ADD ball_Y,AX
 		
 		MOV AX, window_diff
 		CMP ball_Y,AX			;if current ballY position <=0 + specified window difference, then it collides
-		JLE reverse_YSpeed		;reverse the speed
+		JLE NEG_VELOCITY_Y		;reverse the speed
 		
 		MOV AX,window_Height	;if current ballY position >=window, then it collides
 		SUB AX, ball_Size		; account for ball size
 		SUB AX, window_diff
 		CMP ball_Y,AX			
-		JGE reverse_YSpeed		;;reverse the speed
+		JGE NEG_VELOCITY_Y		;reverse the speed
 		
-		RET
+		;Check if the ball is colliding with the right paddle 
+		;maxx1 > minx2 && minx1 < maxx2 && maxy1 > miny1 && miny1 < maxy2
+		;ball_x + ball_Size > paddle_right_x && ball_x < paddle_right_x + paddle_width && ball_y + ball_Size > paddle_right_y && ball_y < paddle_right_y + paddle_height
 		
-		reset_position:
-			CALL RESET_BALL_POSITION
+		MOV AX, ball_x 
+		ADD AX, ball_Size
+		CMP AX, paddle_right_x
+		JNG CHECK_COLLISION_WITH_LEFT_PADDLE ;if there's no collision check for the left paddle collisions
+		
+		MOV AX, paddle_right_x
+		ADD AX, paddle_width
+		CMP ball_X, AX
+		JNL CHECK_COLLISION_WITH_LEFT_PADDLE ;if there's no collision check for the left paddle collisions
+		
+		MOV AX, ball_Y
+		ADD AX, ball_Size
+		CMP AX, paddle_right_y
+		JNG CHECK_COLLISION_WITH_LEFT_PADDLE ;if there's no collision check for the left paddle collisions
+		
+		MOV AX, paddle_right_y
+		ADD AX, paddle_height
+		CMP ball_Y, AX
+		JNL CHECK_COLLISION_WITH_LEFT_PADDLE ;if there's no collision check for the left paddle collisions
+		
+		JMP NEG_VELOCITY_X
+		
+		;Check if the ball is colliding with the left paddle 
+		CHECK_COLLISION_WITH_LEFT_PADDLE: 
+			MOV AX, ball_x 
+			ADD AX, ball_Size
+			CMP AX, paddle_left_x
+			JNG EXIT_COLLISION_CHECK ;if there's no collision exit procedure
+		
+			MOV AX, paddle_left_x
+			ADD AX, paddle_width
+			CMP ball_X, AX
+			JNL EXIT_COLLISION_CHECK ;if there's no collision exit procedure
+		
+			MOV AX, ball_Y
+			ADD AX, ball_Size
+			CMP AX, paddle_left_y
+			JNG EXIT_COLLISION_CHECK ;if there's no collision exit procedure
+		
+			MOV AX, paddle_left_y
+			ADD AX, paddle_height
+			CMP ball_Y, AX
+			JNL EXIT_COLLISION_CHECK ;if there's no collision check for the right paddle collisions
+			
+		JMP NEG_VELOCITY_X
+		
+		NEG_VELOCITY_Y:
+			NEG ball_YSpeed ;Reverse the horizontal velocity of the ball
 			RET
 			
-		reverse_YSpeed:
-			NEG ball_YSpeed
+		NEG_VELOCITY_X:
+			NEG ball_XSpeed
+			RET
+		
+	
+		EXIT_COLLISION_CHECK:
 			RET
 			
 	MOVE_BALL ENDP
@@ -283,7 +358,7 @@ CODE SEGMENT PARA 'CODE'
 			MOVE_RIGHT_PADDLE_DOWN:
 				MOV AX, paddle_velocity
 				ADD paddle_right_y, AX
-			
+				
 				;This code is written to keep the paddle in bounds for the windows
 				MOV AX, window_Height
 				SUB AX, window_diff
