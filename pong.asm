@@ -5,25 +5,50 @@ STACK ENDS
 DATA SEGMENT PARA 'DATA'
 	
 	prev_time DB 0   ;used to check if time has passed
+	GAME_ACTIVE DB 1 	;1 = Game Active, Start as 1
+	WINNER_INDEX DB 0 	;index of the winner (1->P1, 2->P2)
+	CURRENT_SCENE DB 0 	;0 -> Main Menu, 1-> Game
+	EXITING_GAME DB 0   ;0 -> Stay in Game, 1-> Leave
+
+	TEXT_PLAYER_ONE_POINTS DB '0', '$'  ;string for keeping track of player 1 score
+	TEXT_PLAYER_TWO_POINTS DB '0', '$'  ;string for keeping track of player 2 score
+
+	TEXT_GAME_OVER_TITLE DB 'GAME OVER', '$' ;game over menu title
+	TEXT_GAME_OVER_WINNER DB 'Player 0 Won', '$' ;Winner string
+	TEXT_GAME_OVER_PLAY_AGAIN DB 'Press R to Restart', '$' ;Play Again String
+	TEXT_GAME_OVER_MAIN_MENU DB 'Press E to Exit to main menu', '$' ;Game over menu message string
+
+	TEXT_MAIN_MENU_TITLE DB 'MAIN MENU', '$' ;String for Main Menu Title
+	TEXT_MAIN_MENU_SINGLEPLAYER DB 'SINGLEPLAYER - S Key', '$' ;String for Singleplayer option
+	TEXT_MAIN_MENU_MULTIPLAYER DB 'MULTIPLAYER - M Key', '$' ;String for Multiplayer option
+	TEXT_MAIN_MENU_EXIT DB 'EXIT - E Key', '$' ;String for Exit option
+	
+
 	ball_origin_x DW 0A0h ;center of screen for ball to return to
 	ball_origin_y DW 64h ;center of screen for ball to return to
 	ball_X DW 0A0h  ;x pos ball (column) current
 	ball_Y DW 64h  ;y pos ball (row) current
 	ball_Size DW 05h ;size of ball, set to 25 pixels
-	ball_XSpeed DW 05h ; X speed of ball movement
-	ball_YSpeed DW 07h ; Y speed of ball movement
+	ball_XSpeed DW 07h ; X speed of ball movement
+	ball_YSpeed DW 09h ; Y speed of ball movement
+
 	window_Width DW 140h	; x length of window
 	window_Height DW 0C8h ; y height of window
 	window_diff DW 05h		; you can specify how far from the window borders you want the ball to collide from 
+
 	paddle_left_x DW 0Ah ;paddle x position current
 	paddle_left_y DW 0Ah ;paddle y position current
-	paddle_left_points DB 0 ;current point of the left player (player 1)
+	player_one_points DB 0 ;current point of the left player (player 1)
+
 	paddle_right_x DW 130h ;paddle x position current
 	paddle_right_y DW 0Ah ;paddle y position current
-	paddle_right_points DB 0; current point of the right player (player 2)
+	player_two_points DB 0; current point of the right player (player 2)
+
+	AI_CONTROLLED DB 0 	;Should Right Paddle be controlled by ai?
+
 	paddle_width DW 05h ;paddle's width
 	paddle_height DW 1Fh ;paddle's height
-	paddle_velocity DW 05h ;paddle's velocity
+	paddle_velocity DW 10h ;paddle's velocity
 	
 	
 
@@ -45,10 +70,21 @@ CODE SEGMENT PARA 'CODE'
 		CALL RESET_SCREEN ; Resets background and initalizes INT 10h video configurations
 		
 		check_time:
+
+			CMP EXITING_GAME, 01h
+			JE START_EXIT_PROCESS
+			
+			CMP CURRENT_SCENE, 00h		;0 -> Scene is main menu
+			JE SHOW_MAIN_MENU			;Disp main menu
+
+			CMP GAME_ACTIVE, 00h ;Check if Game is active (1 -> Active, 0 -> Game Over)
+			JE SHOW_GAME_OVER	;If equal, game is over
 		
 			MOV AH,2Ch  ; get system time
 			INT 21h		;execute config, CH = hour, CL = min, DH = second, DL = 1/100 second
 		
+
+
 			CMP DL, prev_time	;compare current time and previous time.
 			JE check_time		;if they are equal, check again. if not, time has passed and update the graphics
 			MOV prev_time, DL 	; update time
@@ -58,10 +94,23 @@ CODE SEGMENT PARA 'CODE'
 			
 			CALL MOVE_PADDLES ;This procedure will move the paddles
 			CALL DRAW_PADDLES ;This procedure will draw our left and right paddles
+
+			;Previously just called UI for some reason?
+			CALL DRAW_UI			  ;Draw entire game user interface
 			
-			JMP check_time		;keep checking time in an infinite loop
-		
-		
+			JMP check_time		;keep checking time in an infinite 
+
+			SHOW_GAME_OVER:
+				CALL DRAW_GAME_OVER_MENU 	;Draw Game Over Menu
+				JMP check_time
+				RET
+			
+			SHOW_MAIN_MENU:
+				CALL DRAW_MAIN_MENU
+				JMP check_time
+
+			START_EXIT_PROCESS:
+				CALL CONCLUDE_EXIT_GAME
 		RET
 	MAIN ENDP
 	
@@ -155,6 +204,249 @@ CODE SEGMENT PARA 'CODE'
 		RET
 	DRAW_PADDLES ENDP
 	
+	DRAW_UI PROC NEAR 
+;		DRAW THE POINTS OF LEFT PLAYER (PLAER ONE)
+		MOV AH,02h					;set cursor pos
+		MOV BH,00h					;set page num
+		MOV DH,04h					;set row
+		MOV DL,06h					;set column
+		INT 10h						;Dosbox interrupt
+
+		MOV AH,09h					;Write string to stdout
+		LEA DX,TEXT_PLAYER_ONE_POINTS ;DX -> Player One Points (string)
+		INT 21h						;print the string
+
+;		DRAW THE POINTS OF THE RIGHT PLAYER (PLAYER TWO)
+		MOV AH,02h					;CURSOR POS
+		MOV BH,00h					;PAGE NUM
+		MOV DH,04h					;ROW
+		MOV DL,20h					;COLUMN
+		INT 10h						;interrupt
+
+		MOV AH,09h
+		LEA DX,TEXT_PLAYER_TWO_POINTS ;DX -> Player Two Points (String)
+		INT 21h						;print
+		
+		RET
+	DRAW_UI ENDP
+
+
+	UPDATE_TEXT_PLAYER_ONE_POINTS PROC NEAR
+
+		XOR AX, AX 					;clean AX
+		MOV AL, player_one_points	;Store Player one Points inside AL
+
+		;Before Printing, Convert decimal value to the ascii code character
+		;Do this by adding 30h (number to ASCII)
+		;and by subtracting 30h (ASCII to number)
+		ADD AL, 30h 				;Ascii value of player one points
+		MOV [TEXT_PLAYER_ONE_POINTS], AL ;Store this value back into the string  
+
+		RET
+	UPDATE_TEXT_PLAYER_ONE_POINTS ENDP
+
+
+
+	UPDATE_TEXT_PLAYER_TWO_POINTS PROC NEAR
+		XOR AX, AX 			;Clean
+		MOV AL, player_two_points ;Store int value
+
+		;Need to Convert to ascii
+
+		Add AL, 30h 		;Int -> Ascii
+		MOV [TEXT_PLAYER_TWO_POINTS], AL ;Store this value back into string
+
+		RET
+	UPDATE_TEXT_PLAYER_TWO_POINTS ENDP
+
+
+	DRAW_GAME_OVER_MENU PROC NEAR	;Draw Game over Menu
+		CALL RESET_SCREEN  			;need a clear screen to begin drawing
+
+;		Show Game Over Menu
+		MOV AH,02h					;CURSOR POS
+		MOV BH,00h					;PAGE NUM
+		MOV DH,04h					;ROW
+		MOV DL,04h					;COLUMN
+		INT 10h						;interrupt
+
+		MOV AH,09h					;Write String to stdout
+		LEA DX, TEXT_GAME_OVER_TITLE ;DX -> Game Over Title (String)
+		INT 21h						;print
+
+;		Show Winner
+		MOV AH,02h					;CURSOR POS
+		MOV BH,00h					;PAGE NUM
+		MOV DH,06h					;ROW
+		MOV DL,04h					;COLUMN
+		INT 10h						;interrupt
+
+		CALL UPDATE_WINNER_TEXT
+
+		MOV AH,09h					
+		LEA DX, TEXT_GAME_OVER_WINNER ;DX -> Player x Winner (String)
+		INT 21h						;print
+
+;		Show Play Again Msg
+		MOV AH,02h					;CURSOR POS
+		MOV BH,00h					;PAGE NUM
+		MOV DH,08h					;ROW
+		MOV DL,04h					;COLUMN
+		INT 10h						;interrupt
+
+		MOV AH,09h					
+		LEA DX, TEXT_GAME_OVER_PLAY_AGAIN ;DX -> Game Over Text(String)
+		INT 21h						;print
+
+;		Show Exit Msg
+		MOV AH,02h					;CURSOR POS
+		MOV BH,00h					;PAGE NUM
+		MOV DH,0Ah					;ROW
+		MOV DL,04h					;COLUMN
+		INT 10h						;interrupt
+
+		MOV AH,09h					
+		LEA DX, TEXT_GAME_OVER_MAIN_MENU ;DX -> Game Over Menu Text(String)
+		INT 21h						;print
+
+;		Wait For R or E Key Press to cont.
+		MOV AH,00h			;Wait for key press instruction
+		INT 16h				;Interrupt to execute, key press stored in AL
+
+;		R Check
+		CMP AL, 'R' 		;If R (or r) key is pressed....
+		JE RESTART_GAME		;restart game
+		CMP AL, 'r'
+		JE RESTART_GAME
+
+;		E Check
+		CMP AL, 'E' 		;If R (or r) key is pressed....
+		JE EXIT_TO_MAIN_MENU		;restart game
+		CMP AL, 'e'
+		JE EXIT_TO_MAIN_MENU
+		RET
+
+		RESTART_GAME:
+			MOV GAME_ACTIVE,01h		;Game state reset
+
+			RET
+	
+		EXIT_TO_MAIN_MENU:
+			MOV GAME_ACTIVE,00h 
+			MOV CURRENT_SCENE,00h
+			RET
+	DRAW_GAME_OVER_MENU ENDP
+
+	DRAW_MAIN_MENU PROC NEAR
+
+	CALL RESET_SCREEN
+;		Show Main Menu
+		MOV AH,02h					;CURSOR POS
+		MOV BH,00h					;PAGE NUM
+		MOV DH,04h					;ROW
+		MOV DL,04h					;COLUMN
+		INT 10h						;interrupt
+
+		MOV AH,09h					;Write String to stdout
+		LEA DX, TEXT_MAIN_MENU_TITLE ;DX 
+		INT 21h						;print
+
+;		Show Single Player Option Line
+		MOV AH,02h					;CURSOR POS
+		MOV BH,00h					;PAGE NUM
+		MOV DH,06h					;ROW
+		MOV DL,04h					;COLUMN
+		INT 10h						;interrupt
+
+		MOV AH,09h					;Write String to stdout
+		LEA DX, TEXT_MAIN_MENU_SINGLEPLAYER ;DX 
+		INT 21h						;print
+
+;		Show Multiplayer Option Line
+		MOV AH,02h					;CURSOR POS
+		MOV BH,00h					;PAGE NUM
+		MOV DH,08h					;ROW
+		MOV DL,04h					;COLUMN
+		INT 10h						;interrupt
+
+		MOV AH,09h					;Write String to stdout
+		LEA DX, TEXT_MAIN_MENU_MULTIPLAYER ;
+		INT 21h						;print
+
+;		Show Exit Option Line
+		MOV AH,02h					;CURSOR POS
+		MOV BH,00h					;PAGE NUM
+		MOV DH,0Ah					;ROW
+		MOV DL,04h					;COLUMN
+		INT 10h						;interrupt
+
+		MOV AH,09h					;Write String to stdout
+		LEA DX, TEXT_MAIN_MENU_EXIT ;
+		INT 21h						;print
+
+		MAIN_MENU_WAIT_FOR_KEY:
+;			Wait For Player Selection.
+			MOV AH,00h			;Wait for key press instruction
+			INT 16h				;Interrupt to execute, key press stored in AL
+
+;		Check Which Key (option) was pressed
+
+;		s Check
+			CMP AL, 'S' 		;If S key is pressed....
+			JE START_SINGLEPLAYER		;Start Singleplayer
+			CMP AL, 's'
+			JE START_SINGLEPLAYER
+
+;		M Check
+			CMP AL, 'M' 		;If M key is pressed....
+			JE START_MULTIPLAYER		;Start Multiplayer
+			CMP AL, 'm'
+			JE START_MULTIPLAYER
+
+;		E Check
+			CMP AL, 'E' 		;If E key is pressed....
+			JE EXIT_GAME		;Exit
+			CMP AL, 'e'
+			JE EXIT_GAME
+			JMP MAIN_MENU_WAIT_FOR_KEY ;Loop infinitely until a key is pressed
+
+		START_SINGLEPLAYER:
+			MOV CURRENT_SCENE, 01h
+			MOV GAME_ACTIVE, 01h
+			RET
+
+		START_MULTIPLAYER:
+			MOV CURRENT_SCENE, 01h
+			MOV GAME_ACTIVE, 01h
+			MOV AI_CONTROLLED, 01h
+			RET
+
+		EXIT_GAME:
+			MOV EXITING_GAME, 01h
+			RET
+
+	DRAW_MAIN_MENU ENDP
+
+	UPDATE_WINNER_TEXT PROC NEAR
+		MOV AL, WINNER_INDEX 		;Store the winner (1 or 2) into AL
+		ADD AL, 30h					;Convert int to ascii string
+		MOV [TEXT_GAME_OVER_WINNER + 7], AL	;Player X becomes winner (x is index 7)
+		RET
+	UPDATE_WINNER_TEXT ENDP
+
+
+	CONCLUDE_EXIT_GAME PROC NEAR	;Exit pong game, go back to text mode
+		MOV AH, 00h 			;Set config to text mode
+		MOV AL, 02h				;Choose text mode
+		INT 10h					;Execute config
+
+		MOV AH, 4Ch				;Terminate Program
+		INT 21h					;^
+
+
+		RET
+	CONCLUDE_EXIT_GAME ENDP
+
 	MOVE_BALL PROC NEAR
 		
 		MOV AX, ball_XSpeed
@@ -172,23 +464,49 @@ CODE SEGMENT PARA 'CODE'
 		JMP MOVE_BALL_VERTICALLY
 		
 		GIVE_POINTS_TO_PLAYER_ONE:
-			INC paddle_left_points ;increment player one points
+			INC player_one_points ;increment player one points
 			CALL RESET_BALL_POSITION ;reset ball to the center of the screen
-			CMP paddle_left_points, 05h;check if this player has reached 5 points
+
+			CALL UPDATE_TEXT_PLAYER_ONE_POINTS ;UPDATE THE TEXT OF THE PLAYER ONE POINTS
+
+			CMP player_one_points, 05h;check if this player has reached 5 points
 			JGE GAME_OVER ;if this player reached 5 or more, the game is over
 			RET
 			
 		GIVE_POINTS_TO_PLAYER_TWO:
-			INC paddle_right_points ;increment player two points
+			INC player_two_points ;increment player two points
 			CALL RESET_BALL_POSITION ;reset ball to the center of the screen
-			CMP paddle_right_points, 05h;check if this player has reached 5 points
+
+			CALL UPDATE_TEXT_PLAYER_TWO_POINTS ;UPDATE THE TEXT OF THE PLAYER TWO POINTS
+			
+			CMP player_two_points, 05h;check if this player has reached 5 points
 			JGE GAME_OVER ;if this player reached 5 or more, the game is over
 			RET
 			
 		GAME_OVER: ;someone has reached 5 points
-			MOV paddle_left_points, 00h ;restart player one points
-			MOV paddle_right_points, 00h ;restart player two points
-			RET
+
+			CMP player_one_points,05h ;Check who reached 5 points, change winner index based off that
+			JNL WINNER_IS_PLAYER_ONE
+			JMP WINNER_IS_PLAYER_TWO
+
+			WINNER_IS_PLAYER_ONE:			;P1 Wins
+					MOV WINNER_INDEX, 01h
+					JMP CONTINUE_GAME_OVER
+
+			WINNER_IS_PLAYER_TWO:			;P2 Wins
+					MOV WINNER_INDEX, 02h
+					JMP CONTINUE_GAME_OVER
+			
+			CONTINUE_GAME_OVER:
+				MOV player_one_points, 00h ;restart player one points
+				MOV player_two_points, 00h ;restart player two points
+				CALL UPDATE_TEXT_PLAYER_ONE_POINTS
+				CALL UPDATE_TEXT_PLAYER_TWO_POINTS
+				MOV GAME_ACTIVE,00h 		;Stops Game
+				MOV AI_CONTROLLED, 00h
+
+
+				RET
 		
 		MOVE_BALL_VERTICALLY: 		
 			MOV AX,ball_YSpeed		;move ball in ySpeed direction
@@ -327,20 +645,43 @@ CODE SEGMENT PARA 'CODE'
 		
 		;right paddle movement 
 		CHECK_RIGHT_PADDLE_MOVEMENT:
-		
-			;if it is 'l' or 'L' move down
-			CMP AL, 6Fh ;'o'
-			JE MOVE_RIGHT_PADDLE_UP
-			CMP AL, 4Fh ;'O'
-			JE MOVE_RIGHT_PADDLE_UP
-		
-			;if it is 'o' or 'O' move up
-			CMP AL, 6Ch ;'l'
-			JE MOVE_RIGHT_PADDLE_DOWN
-			CMP AL, 4Ch ;'L'
-			JE MOVE_RIGHT_PADDLE_DOWN
-			JMP EXIT_PADDLE_MOVEMENT
-		
+			CMP AI_CONTROLLED, 01h
+			JE CONTROL_BY_AI
+
+;			User controlled paddle (Through Key Press)
+			CHECK_FOR_KEYS:
+				;if it is 'l' or 'L' move down
+				CMP AL, 6Fh ;'o'
+				JE MOVE_RIGHT_PADDLE_UP
+				CMP AL, 4Fh ;'O'
+				JE MOVE_RIGHT_PADDLE_UP
+			
+				;if it is 'o' or 'O' move up
+				CMP AL, 6Ch ;'l'
+				JE MOVE_RIGHT_PADDLE_DOWN
+				CMP AL, 4Ch ;'L'
+				JE MOVE_RIGHT_PADDLE_DOWN
+				JMP EXIT_PADDLE_MOVEMENT
+			
+;			Pattle Controlled by AI
+			CONTROL_BY_AI:
+				;Check if ball is above paddle (ball_y + ball_size < paddle_right_y)
+				;->Move paddle up
+				MOV AX, Ball_y
+				ADD AX, ball_Size
+				CMP AX, paddle_right_y
+				JL MOVE_RIGHT_PADDLE_UP
+				
+				;Check if ball is below paddle (Ball_y > paddle_right_y + paddle_height)
+				;->Move paddle down
+				MOV AX, paddle_right_y
+				ADD AX, paddle_height
+				CMP AX, ball_y
+				JL MOVE_RIGHT_PADDLE_DOWN
+				
+				;If neither, don't move paddle
+				JMP EXIT_PADDLE_MOVEMENT
+
 			MOVE_RIGHT_PADDLE_UP:
 				MOV AX, paddle_velocity
 				SUB paddle_right_y, AX
